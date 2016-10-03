@@ -55,7 +55,8 @@ Six essential features:
 ## Using Declare Design
 Let's install it first:
 ```{r,eval=FALSE}
-source("https://declaredesign.org/install.R")
+#Please install devtools package first
+devtools::install_github(repo = "DeclareDesign/DeclareDesign", ref = "ucla-ps-209")
 ```
 If the installation gives you an error, you should install the dependancies it tells you about
 
@@ -420,6 +421,7 @@ kable(summary(diagnosis) [,c("diagnosand_label","diagnosand"), drop=F], digits =
 
 ## Mock Analysis
 After settling on a sample size and a final design, we can conduct a mock analysis of the data to ensure we are satisfied with the analysis of the data. To do this, we create mock data – simulated from the distributions we set – and then run the analyses on the simulated data.
+
 ```{r}
 mock_population <- draw_population(population = population)
 mock_population <- assign_treatment(
@@ -429,8 +431,8 @@ mock_population <- draw_outcome(data =
                                   mock_population, 
                                 potential_outcomes = 
                                   potential_outcomes)
-get_estimands(estimator = estimator, 
-              data = mock_population)
+kable(get_estimands(estimator = estimator, 
+              data = mock_population), digits = 3)
 ```
 
 ## Look at the results
@@ -442,7 +444,7 @@ kable(get_estimates(estimator = estimator, data = mock_population), digits = 3)
 
 ## Custom Functions
 Here a custom population function just selects N random numbers.
-```{r, eval=F}
+```{r}
 my_population <- function(size) { data.frame(income = rnorm(size)) }
 population <- declare_population(custom_population_function = my_population, 
                                       size = 100)
@@ -450,7 +452,7 @@ population <- declare_population(custom_population_function = my_population,
 
 ## Custom Functions
 This formula and the condition names defined in the declaration place restrictions on the remaining workflow, by setting the outcome name to Y and the names of the conditions. When potential outcomes are constructed in mock data, they will be named in this case Y_Z1 and Y_Z0. When realized outcomes based on a treatment assignment are created, they will be named in this case Y.
-```{r,eval=F}
+```{r}
 my_potential_outcomes <- function(data) { (data$Z == "Z1") * 0.25 + 
     runif(nrow(data)) }
 potential_outcomes <- declare_potential_outcomes(
@@ -462,7 +464,7 @@ potential_outcomes <- declare_potential_outcomes(
 ## Custom Functions
 An estimand function takes a data frame with potential outcome columns and returns a scalar.
 This one that calculates the difference in means.
-```{r,eval=F}
+```{r}
 my_estimand    <- function(data) { mean(data$Y_Z_Z1 - data$Y_Z_Z0) }
 estimand       <- declare_estimand(estimand_function = my_estimand, 
                                    potential_outcomes = potential_outcomes)
@@ -470,7 +472,7 @@ estimand       <- declare_estimand(estimand_function = my_estimand,
 
 ## Custom Functions
 An assignment function takes a data frame and returns a vector of treatment assignments
-```{r,eval=F}
+```{r}
 my_assignment  <- function(data) { N <- nrow(data); 
 sample(c("Z0", "Z1"),
   N, replace = T) }
@@ -483,7 +485,7 @@ assignment     <- declare_assignment(
 An estimates function takes data and returns a matrix with columns representing estimates and rows representing statistics of the estimates, such as the estimate itself, the standard error, the p-value, etc.
 
 ## Custom Functions
-```{r,eval=F}
+```{r}
 my_estimates   <- function(data) { 
   est      <- mean(data$Y[data$Z == "Z1"]) -
     mean(data$Y[data$Z == "Z0"])
@@ -506,7 +508,7 @@ estimator      <- declare_estimator(estimates = my_estimates,
 
 ## Custom Functions
 Now you can declare the full design, using these six steps.
-```{r,eval=F}
+```{r}
 my_design      <- declare_design(population = population,
                                  sampling = sampling, 
                                  potential_outcomes = potential_outcomes,
@@ -515,7 +517,7 @@ my_design      <- declare_design(population = population,
                                  label = "my-design")
 ```
 ## Diagnosis
-```{r,eval=F}
+```{r}
 diagnosis <- diagnose_design(design = my_design)
 kable(summary(diagnosis) [,c("diagnosand_label","diagnosand"), drop=F], digits = 3)
 ```
