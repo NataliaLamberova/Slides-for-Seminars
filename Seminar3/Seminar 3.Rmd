@@ -1,0 +1,545 @@
+---
+title: "Seminar 3"
+author: "Natalia Lamberova"
+date: "5 октября 2016 г."
+output: ioslides_presentation
+---
+
+## Think about Randomization!
+
+Not understanding the randomization procedure can result in problems:       
+* Units may have different probabilities of assignment to treatment. Ignoring that leads to biased estimates of the treatment effect.     
+* Units are sometimes assigned to treatment as a cluster. Ignoring clustering can bias estimates of average causal effects and the uncertainty attending to them.
+
+## Randomizr package
+
+Randomization becomes:   
+- Reproducible   
+- Flexible   
+- Transparent   
+
+
+## A Hypothetical Experiment: Get the Data
+
+```{r}
+# Load built-in dataset
+data(HairEyeColor)
+HairEyeColor <- data.frame(HairEyeColor)
+# Transform so each row is a subject
+# Columns describe subject's hair color, eye color, and gender
+hec <- HairEyeColor[rep(1:nrow(HairEyeColor),
+                        times = HairEyeColor$Freq), 1:3]
+
+N <- nrow(hec)
+# Fix the rownames
+rownames(hec) <- NULL
+```
+
+## So what do we know about the data?
+
+```{r}
+dim(hec)
+head(hec,2)
+```
+
+## Create Potential Outcomes
+
+```{r}
+# Set a seed for reproducability
+set.seed(343)
+# Create untreated and treated outcomes for all subjects
+hec <- within(hec,{
+  Y0 <- rnorm(n = N,mean = (
+    2*as.numeric(Hair) +
+     -4*as.numeric(Eye) + 
+     -6*as.numeric(Sex)), sd = 5)
+  Y1 <- Y0 + 6*as.numeric(Hair) +
+    4*as.numeric(Eye) + 
+    2*as.numeric(Sex)
+})
+# Calculate true ATE
+atet<-with(hec, mean(Y1 - Y0))
+atet
+```
+
+## Simple Random Assignment
+* All subjects are assigned to treatment with an equal probability by flipping a (weighted) coin for each subject.            
+* The number of subjects assigned to treatment is itself a random number - depending on the random assignment, a different number of subjects might be assigned to each group. 
+
+## Simple Random Assignment
+
+```{r}
+library(randomizr)
+Z <- simple_ra(N = N)
+table(Z)
+#To change the probability of assignment, specify the prob argument:
+Z <- simple_ra(N = N, prob = 0.30)
+table(Z)
+```
+
+## Simple Random Assignment
+```{r}
+#If you specify num_arms without 
+#changing prob_each, simple_ra() 
+#will assume equal probabilities across all arms.
+Z <- simple_ra(N = N, num_arms = 3)
+table(Z)
+#You can also just specify the probabilites 
+#of your multiple arms. 
+#The probabilities must sum to 1.
+Z <- simple_ra(N = N, prob_each = c(.2, .2, .6))
+table(Z)
+```
+
+## Simple Random Assignment
+```{r}
+#You can also name your treatment arms.
+Z <- simple_ra(N = N, prob_each = c(.2, .2, .6),
+               condition_names=c("control", "placebo", "treatment"))
+table(Z)
+```
+
+## Complete Random Assignment
+Complete random assignment is very similar to simple random assignment, except that the researcher can specify exactly how many units are assigned to each condition.
+
+## Complete Random Assignment
+The syntax for ***complete_ra()*** is very similar to that of ***simple_ra()***. The argument m is the number of units assigned to treatment in two-arm designs; it is analogous to ***simple_ra()***’s prob. Similarly, the argument ***m_each*** is analogous to prob_each.
+
+If you only specify ***N***, ***complete_ra()*** assigns exactly half of the subjects to treatment.
+
+## Complete Random Assignment
+```{r}
+Z <- complete_ra(N = N)
+table(Z)
+
+#To change the number of units assigned, specify the m argument:
+
+Z <- complete_ra(N = N, m = 200)
+table(Z)
+```
+
+## Complete Random Assignment
+```{r}
+#If you specify multiple arms, complete_ra() 
+#will assign an equal (within rounding) 
+#number of units to treatment.
+
+Z <- complete_ra(N = N, num_arms = 3)
+table(Z)
+```
+## Complete Random Assignment
+
+```{r}
+#You can also specify exactly 
+#how many units should be assigned 
+#to each arm. The total of m_each must equal N.
+Z <- complete_ra(N = N, m_each = c(100, 200, 292))
+table(Z)
+#You can also name your treatment arms.
+Z <- complete_ra(N = N, m_each = c(100, 200, 292),
+               condition_names = c("control", "placebo", "treatment"))
+table(Z)
+```
+
+## Simple and Complete Random Assignment Compared
+If the number of units is known beforehand, ***complete_ra()*** is always preferred:   
+1. Researchers can plan exactly how many treatments will be deployed.    
+2. The standard errors associated with complete random assignment are generally smaller, increasing experimental power. 
+
+## Simple and Complete Random Assignment Compared
+ Sometimes the random assignment isn’t directly in the researcher’s control. When deploying a survey exeriment on a platform like Qualtrics, simple random assignment is the only possibility. When reconstructing the random assignment for analysis after the experiment has been conducted, ***simple_ra()*** provides a convenient way to do so.
+
+## Simple and Complete Random Assignment Compared
+```{r}
+sims <- 1000
+
+# Set up empty vectors to collect results
+simple_ests <- rep(NA, sims)
+complete_ests <- rep(NA, sims)
+```
+
+## Simple and Complete Random Assignment Compared
+```{r}
+for(i in 1:sims){
+  hec <- within(hec,{
+    # Conduct both kinds of random assignment
+    Z_simple <- simple_ra(N = N)
+    Z_complete <- complete_ra(N = N)
+    # Reveal observed potential outcomes
+    Y_simple <- Y1*Z_simple + Y0*(1-Z_simple)
+    Y_complete <- Y1*Z_complete + Y0*(1-Z_complete)
+    })
+# Estimate ATE under both models
+fit_simple <- lm(Y_simple ~ Z_simple, data=hec)
+fit_complete <- lm(Y_complete ~ Z_complete, data=hec)
+# Save the estimates
+simple_ests[i] <- coef(fit_simple)[2]
+complete_ests[i] <- coef(fit_complete)[2]
+}
+```
+
+## Simple and Complete Random Assignment Compared
+```{r}
+sd(simple_ests)
+sd(complete_ests)
+```
+
+
+## Block Random Assignment
+Subjects are sorted into blocks (strata) according to their pre-treatment covariates, and then complete random assignment is conducted within each block. For example, a researcher might block on gender, assigning exactly half of the men and exactly half of the women to treatment.
+
+## Block Random Assignment
+Why block?      
+* To signal to future readers that treatment effect heterogeneity may be of interest: is the treatment effect different for men versus women?    
+* To increase precision. If the blocking variables are predicitive of the outcome (i.e., they are correlated with the outcome), then blocking may help to decrease sampling variability.
+
+## Block Random Assignment
+Blocking can also produce complications for estimation. Blocking can produce different probabilities of assignment for different subjects. This complication is typically addressed in one of two ways: “controlling for blocks” in a regression context, or inverse probabilitity weights (IPW), in which units are weighted by the inverse of the probability that the unit is in the condition that it is in.
+
+## Block Random Assignment
+```{r}
+Z <- block_ra(block_var = hec$Hair)
+table(Z, hec$Hair)
+#For multiple treatment arms, use the num_arms argument, #with or without the condition_names argument
+Z <- block_ra(block_var = hec$Hair, num_arms = 3)
+table(Z, hec$Hair)
+Z <- block_ra(block_var = hec$Hair, condition_names = c("Control", "Placebo", "Treatment"))
+table(Z, hec$Hair)
+
+```
+
+## Block Random Assigmnent
+The ***prob_each*** argument describes what proportion of each block should be assigned to treatment arm.  ***block_ra()*** still uses complete random assignment within each block
+```{r}
+Z <- block_ra(block_var = hec$Hair, prob_each = c(.3, .7))
+table(Z, hec$Hair)
+```
+
+## Block Random Assigmnent
+For finer control, use the block_m_each argument, which takes a matrix with as many rows as there are blocks, and as many columns as there are treatment conditions. Remember that the rows are in the same order as ***sort(unique(block_var))***, a command that is good to run before constructing a block_m_each matrix.
+```{r}
+sort(unique(hec$Hair))
+```
+
+## Block Random Assigmnent
+```{r}
+block_m_each <- rbind(c(78, 30),
+                      c(186, 100),
+                      c(51, 20),
+                      c(87,40))
+
+Z <- block_ra(block_var = hec$Hair, block_m_each = block_m_each)
+table(Z, hec$Hair)
+```
+
+## Block Random Assigmnent
+Note that different blocks have different probabilities of assignment to treatment. In this case, people with Black hair have a 30/108 = 27.8% chance of being treated, those with Brown hair have 100/286 = 35.0% chance. Left unadressed, this discrepancy could bias treatment effects. We can see this directly with the ***declare_ra()*** function.
+```{r}
+declaration <- declare_ra(block_var = hec$Hair, block_m_each = block_m_each)
+# show the probability that each unit is assigned to each condition
+head(declaration$probabilities_matrix,3)
+```
+
+## Block Random Assigmnent
+```{r}
+# Show that the probability of treatment is different within block
+table(hec$Hair, round(declaration$probabilities_matrix[,2], 3))
+```
+There are commong two ways to address this problem: LSDV (Least-Squares Dummy Variable, also known as “control for blocks”) or IPW (Inverse-probability weights).
+
+## Block Random Assignment
+```{r}
+hec <- within(hec,{
+  Z_blocked <- block_ra(block_var = hec$Hair,
+                        block_m_each = block_m_each)
+  Y_blocked <- Y1*(Z_blocked) + Y0*(1-Z_blocked)
+  cond_prob <- obtain_condition_probabilities(declaration, Z_blocked)
+  IPW_weights <- 1/(cond_prob)
+})
+
+fit_LSDV <- lm(Y_blocked ~ Z_blocked + Hair, data=hec)
+fit_IPW <- lm(Y_blocked ~ Z_blocked, weights = IPW_weights, data = hec)
+
+```
+
+## Block Random Assignment
+```{r}
+summary(fit_LSDV)
+```
+
+## Block Random Assignmnet
+```{r}
+summary(fit_IPW)
+```
+
+## How to create Blocks? 1 way:
+```{r}
+block_var <- with(hec, paste(Hair, Eye, Sex, sep = "_"))
+Z <- block_ra(block_var = block_var)
+head(table(block_var, Z))
+```
+
+## How to create Blocks? 2 way:
+```{r}
+#install.packages("blockTools")
+library(blockTools)
+# BlockTools requires that all variables be numeric
+numeric_mat <- model.matrix(~Hair+Eye+Sex, data=hec)[,-1]
+# BlockTools also requres an id variable
+df_forBT <- data.frame(id_var = 1:nrow(numeric_mat), numeric_mat)
+```
+## How to create Blocks? 2 way:
+```{r}
+# Conducting the actual blocking: let's make trios
+out <- block(df_forBT, n.tr = 3, id.vars = "id_var", 
+             block.vars = colnames(df_forBT)[-1])
+# Extact the block_ids
+hec$block_id <- createBlockIDs(out, df_forBT, id.var = "id_var")
+# Conduct actual random assignment with randomizr
+Z_blocked <- block_ra(block_var = hec$block_id, num_arms = 3)
+head(table(hec$block_id, Z_blocked))
+```
+## Clustered assignment
+Clustered assignment is unfortunate. Sometimes, clustered assignment is unavoidable. Examples:     
+1. Housemates in households: whole households are assigned to treatment or control  
+2. Students in classrooms: whole classrooms are assigned to treatment or control    
+3. Residents in towns or villages: whole communities are assigned to treatment or control    
+
+## Clustered assignment
+Clustered assignment decreases the effective sample size of an experiment. In the extreme case when outcomes are perfectly correlated with clusters, the experiment has an effective sample size equal to the number of clusters. When outcomes are perfectly uncorrelated with clusters, the effective sample size is equal to the number of subjects. Almost all cluster-assigned experiments fall somewhere in the middle of these two extremes.
+
+## Clustered assignment
+```{r}
+clust_var <- with(hec, paste(Hair, Eye, Sex, sep = "_"))
+hec$clust_var <- clust_var
+Z_clust <- cluster_ra(clust_var = clust_var)
+head(table(clust_var, Z_clust))
+```
+## Clustered assignment
+```{r}
+#This shows that each cluster is either assigned to #treatment or control. No two units within the same #cluster are assigned to different conditions.
+#As with all functions in randomizr, you can specify #multiple treatment arms in a variety of ways:
+Z_clust <- cluster_ra(clust_var = clust_var, num_arms = 3)
+head(table(clust_var, Z_clust))
+```
+## Clustered assignment
+```{r}
+#m_each, which describes how many clusters should be assigned to each condition. m_each must sum to the number of clusters.
+Z_clust <- cluster_ra(clust_var=clust_var, m_each=c(5, 15, 12))
+#unique(clust_var)
+head(table(clust_var, Z_clust))
+```
+
+## Blocked and clustered assignment
+The power of clustered experiments can sometimes be improved through blocking. In this scenario, whole clusters are members of a particular block – imagine villages nested within discrete regions, or classrooms nested within discrete schools.
+
+## Blocked and clustered assignment: Blocking clusters by size
+```{r}
+suppressMessages(library(dplyr))
+cluster_level_df <- 
+  hec %>%
+  group_by(clust_var) %>%
+  summarize(cluster_size = n()) %>%
+  arrange(cluster_size) %>%
+  mutate(block_var = paste0("block_", sprintf("%02d",rep(1:16, each=2))))
+
+hec <- left_join(hec, cluster_level_df)
+#head(hec)
+```
+
+## Blocked and clustered assignment
+```{r}
+# Extract the cluster and block variables
+clust_var <- hec$clust_var
+block_var <- hec$block_var
+
+Z <- block_and_cluster_ra(clust_var = clust_var, block_var = block_var)
+head(table(clust_var, Z))
+```
+## Blocked and clustered assignment
+```{r}
+head(table(block_var, Z))
+```
+## Calculating probabilities of assignment
+All five random assignment functions in randomizr assign units to treatment with known probabilities. The ***declare_ra()*** and ***obtain_condition_probabilities()*** functions calculate these probabilities according to the parameters of your experimental design.
+
+## Calculating probabilities of assignment
+```{r}
+block_m_each <- 
+  rbind(c(78, 30),
+        c(186, 100),
+        c(51, 20),
+        c(87, 40))
+  
+Z <- block_ra(block_var = hec$Hair,
+              block_m_each = block_m_each)
+
+table(hec$Hair, Z)
+```
+
+## Calculating probabilities of assignment
+```{r}
+declaration <- declare_ra(block_var = hec$Hair,
+                          block_m_each = block_m_each)
+prob_mat <- declaration$probabilities_matrix
+head(prob_mat)
+```
+
+## Calculating probabilities of assignment
+In order to use inverse-probability weights, we need to know the probability of each unit being in the condition that it is in. For each unit, we need to pick the appropriate probability. This bookkeeping is handled automatically by the ***obtain_condition_probabilities()*** function.
+```{r}
+cond_prob <- obtain_condition_probabilities(declaration, Z)
+table(cond_prob, Z)
+```
+
+## Best practices
+Random assignment procedure = Random assignment function
+```{r}
+# 400 families have 1 child in the lottery, 100 families have 2
+family_id <- c(sprintf("%03d", 1:500), sprintf("%03d", 1:100))
+school_ra <- function(m){
+  N <- length(family_id)
+  random_number <- sample(1:N, replace=FALSE)
+  Z <- rep(0, N)
+  i <- 1
+  while(sum(Z) <m){
+    Z[family_id==family_id[random_number[i]]] <- 1
+    i <- i + 1
+  }
+  return(Z)
+}
+Z <- school_ra(200)
+table(Z)
+```
+
+## Check probabilities of assignment directly
+1. Call your random assignment function an approximately infinite number of times (about 10,000 for most purposes).  
+2. Count how often each unit is assigned to each treatment arm.  
+```{r}
+Z_matrix <- replicate(1000, school_ra(200))
+```
+## Check probabilities of assignment directly
+```{r}
+plot(rowMeans(Z_matrix))
+```
+
+## Save your random assignment
+```{r}
+hec <- within(hec,{
+  Z_blocked <- complete_ra(N = N, m_each = c(100, 200, 292),
+               condition_names = c("control", "placebo", "treatment"))
+  id_var <- 1:nrow(hec)
+})
+write.csv(hec[,c("id_var", "Z_blocked")], file = "MyRandomAssignment.csv")
+```
+
+## Ri Package
+This package provides a set of tools for conducting exact or approximate randomization-based inference for experiments of arbitrary design. The primary functionality of the package is in the generation, manipulation and use of permutation matrices
+implied by given experimental designs. Among other features, the package facilitates estimation of average treatmenteffects, constant effects variance estimation, randomization inference for significance testing against sharp null hypotheses and visualization of data and results.
+
+## Ri Package
+```{r}
+#install.packages("ri")
+library(ri)
+set.seed(303)
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0,2,2,4,1,1)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0)
+cluster <- c(1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9)
+block <- c(rep(1,4),rep(2,6),rep(3,8))
+perms <- genperms(Z,blockvar=block, clustvar=cluster) # matrix of all possible permutations. If a # of actual perm>user-specified value(maxiter), does approximation
+#perms
+probs <- genprobexact(Z,blockvar=block, clustvar=cluster) # probability of treatment
+#probs
+ate <- estate(y,Z,prob=probs) # estimate the ATE
+#ate
+```
+
+## Conduct Sharp Null Hypothesis Test of Zero Effect for Each Unit
+```{r}
+Ys <- genouts(y,Z,ate=0) # generate potential outcomes under sharp null of no effect
+#Ys
+distout <- gendist(Ys,perms, prob=probs) # generate sampling dist. under sharp null
+```
+## Ri Package
+```{r}
+dispdist(distout, ate) # display characteristics of sampling distribution for inference
+## Generate Sampling Distribution Around Estimated ATE
+Ys <- genouts(y,Z,ate=ate) ## generate potential outcomes under tau = ATE
+distout <- gendist(Ys,perms, prob=probs) # generate sampling dist. under tau = ATE
+dispdist(distout, ate) ## display characteristics of sampling dist. for inference
+```
+
+## Ri Package
+```{r}
+#Estimating LATE:
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0,2,2,4,1,1)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0)
+D <- c(1,0,0,0,0,0,1,0,1,1,0,1,0,0,1,0,0,1)
+cluster <- c(1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9)
+block <- c(rep(1,4),rep(2,6),rep(3,8))
+probs <- genprobexact(Z,block,cluster) # generate probability of assignment
+late <- estlate(y,D,Z,prob=probs) # estimate the LATE; estimated LATE = 9
+```
+## Ri Package
+```{r}
+#Can get an approximate permutation matrix for an user-supplied randomization function using genperms.custom 
+X <- c(1:200)
+randfun <- function() {
+teststat <- -1
+while (teststat < 0.05) {
+Zri <- sample(c(rep(0,180),rep(1,20))) # imbalanced design
+fstat <- summary(lm(Zri~X))$fstatistic
+#fstat
+teststat <- pf(fstat[1],fstat[2],fstat[3],lower.tail=FALSE) # extract F-test p-value
+}
+return(Zri)
+}
+perms <- genperms.custom(numiter=10000, randfun=randfun) # generate permutations
+probs <- genprob(perms) # generate approximate probabilities from permutation matrix
+cor(probs,(X-mean(X))^2) # observations with extreme X are less likely to be treated
+```
+## Ri Package
+We can get the exact probabilities of treatment assignment for blocked,clustered designs
+```{r}
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0,2,2,4,1,1)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0)
+cluster <- c(1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9)
+block <- c(rep(1,4),rep(2,6),rep(3,8))
+probs <- genprobexact(Z,block,cluster) # generate probability of assignment
+ate <- estate(y,Z,prob=probs) # estimate the ATE; estimated ATE=2
+```
+## Ri Package
+We can also get confidence intervals trough test invesrsion
+```{r}
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0)
+perms <- genperms(Z) ## all possible permutations of assignment to treatment
+probs <- genprobexact(Z) ## assuming complete randomization
+c(invert.ci(y,Z,probs,perms,0.025),invert.ci(y,Z,probs,perms,0.975)) ## 95% CI
+```
+## Ri Package
+```{r}
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0,2,2)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0,0,1)
+perms <- genperms(Z) # all possible permutations of assignment
+```
+## Ri Package
+A convenience function to get ate and inferential stats without covariate adjustment
+```{r}
+omni.ate(y,Z,perms,FALSE)
+# omni.ate(y,Z,perms,TRUE) # may take some time to run
+```
+## Ri Package
+Getting residual-residual (added variable) plot
+```{r}
+y <- c(8,6,2,0,3,1,1,1,2,2,0,1,0,2,2,4,1,1)
+Z <- c(1,1,0,0,1,1,0,0,1,1,1,1,0,0,1,1,0,0)
+X <- c(1:18)
+cluster <- c(1,1,2,2,3,3,4,4,5,5,6,6,7,7,8,8,9,9)
+block <- c(rep(1,4),rep(2,6),rep(3,8))
+probs <- genprobexact(Z,block,cluster) # generate probability of assignment
+```
+## Ri Package
+```{r}
+resresplot(y,Z,X,prob=probs,scale=3) # produce res-res plot
+```
