@@ -1,0 +1,274 @@
+---
+title: "Seminar 4"
+author: "Natalia Lamberova"
+date: "10/15/2016"
+output: html_document
+---
+```{r}
+set.seed(343)
+suppressMessages({
+  library(DeclareDesign)
+  library(xtable)
+  library(knitr)
+  library(sandwich)
+  library(lmtest)
+  library(ggplot2)
+})
+setwd("/Users/a1/Dropbox/1 UCLA/3 Year/experiments")
+```
+## A Six-Step Workflow for Experiments with Custom Functions
+```{r}
+#A population function has to create a data frame whenever it is run. It can optionally have inputs for N, N_per_level, or #group_sizes_per_level (but not more than one) to indicate the sample size. In this example, the input N is used and set in the declaration to #100 (note this allows you to reuse my_pop_function to test out designs with differing sample sizes).
+
+#Here a custom population function just selects N random numbers.
+
+my_population <- function(size) { data.frame(income = rnorm(size)) }
+population      <- declare_population(custom_population_function = my_population, size = 100)
+#Declaring potential outcomes requires that you declare both the treatment levels and a potential outcomes formula ??? ie a statement that maps from possible treatment conditions to Ys. It must indicate what value Y takes for all values that a treatment might take.
+
+#This formula and the condition names defined in the declaration place restrictions on the remaining workflow, by setting the outcome name to Y and the names of the conditions. When potential outcomes are constructed in mock data, they will be named in this case Y_Z1 and Y_Z0. When realized outcomes based on a treatment assignment are created, they will be named in this case Y.
+
+my_potential_outcomes <- function(data) { (data$Z == "Z1") * 0.25 + runif(nrow(data)) }
+potential_outcomes <- declare_potential_outcomes(condition_names = c("Z0", "Z1"), 
+                                                 potential_outcomes_function = my_potential_outcomes,
+                                                 outcome_variable_name = "Y")
+```
+
+## A sampling function then takes a data frame and indicates which rows to select.
+```{r}
+# Taking half the units.
+
+my_sampling    <- function(data) { N <- nrow(data); n <- floor(N/2); sample(rep(c(0, 1), each = N-n), N) }
+sampling       <- declare_sampling(custom_sampling_function = my_sampling)
+```
+
+## An estimand function takes a data frame with potential outcome columns and returns a scalar.
+```{r}
+#Estimand - Difference in means
+
+my_estimand    <- function(data) { mean(data$Y_Z_Z1 - data$Y_Z_Z0) }
+estimand       <- declare_estimand(estimand_function = my_estimand, potential_outcomes = potential_outcomes)
+```
+
+## An assignment function takes a data frame and returns a vector of treatment assignments
+```{r}
+my_assignment  <- function(data) { N <- nrow(data); sample(c("Z0", "Z1"), N, replace = T) }
+assignment     <- declare_assignment(custom_assignment_function = my_assignment, potential_outcomes = potential_outcomes)
+```
+
+##An estimates function 
+
+```{r}
+#takes data and returns a matrix with columns representing estimates and rows representing statistics of the estimates, such as the estimate itself, the standard error, the p-value, etc.
+
+my_estimates   <- function(data) { 
+  est      <- mean(data$Y[data$Z == "Z1"]) - mean(data$Y[data$Z == "Z0"])
+  se       <- sqrt(var(data$Y[data$Z == "Z1"])/sum(data$Z == "Z1") + var(data$Y[data$Z == "Z0"])/sum(data$Z == "Z0"))
+  df       <- nrow(data) - 2
+  p        <- 2 * pt(abs(est/se), df = df, lower.tail = FALSE)
+  ci_lower <- est - 1.96*se
+  ci_upper <- est + 1.96*se
+  data.frame(estimate_label = "diff-in-means",
+             est = est, se = se, p = p, 
+             ci_lower = ci_lower, ci_upper = ci_upper, df = df,
+             stringsAsFactors = FALSE)
+}
+estimator      <- declare_estimator(estimates = my_estimates, estimand = estimand)
+```
+
+## Full design in six steps.
+```{r}
+my_design      <- declare_design(population = population, sampling = sampling, potential_outcomes = potential_outcomes,
+                                 assignment = assignment, estimator = estimator, label = "my-design")
+```
+
+
+## What next?
+```{r}
+#Constructing mock data
+mock_population <- draw_population(population = population, potential_outcomes = potential_outcomes)
+mock_sample <- draw_sample(data = mock_population, sampling = sampling)
+mock_sample <- assign_treatment(data = mock_sample, assignment = assignment)
+mock_sample <- draw_outcome(data = mock_sample, potential_outcomes = potential_outcomes)
+kable(head(mock_sample), digits = 3, row.names = FALSE)
+```
+
+## Diagnosis
+```{r}
+#You can define a custom statistic function which takes as options estimates, estimators, or both and returns a scalar summary of them. You must also include ??? as an option as in the example below. Here, we calculate the proportion of estimates that are larger than zero.
+
+my_statistic <- function(estimates, ...) { mean(sapply(1:length(estimates), function(i)
+  as.numeric(estimates[[i]]["p", , drop = FALSE])) > 0.5) }
+
+diagnosis <- diagnose_design(design = my_design, population_draws = 10, sample_draws = 10)
+
+kable(summary(diagnosis, statistics = list(calculate_PATE, calculate_sd_SATE, calculate_power, 
+                                           calculate_RMSE, calculate_bias, calculate_coverage, 
+                                           my_statistic), labels = c("PATE", "sd(SATE)", "power", "RMSE", "bias", "coverage",
+                                                                     "custom_stat")), digits = 3)
+```
+
+## Modify the design
+```{r}
+#You can modify the design by defining a new version of any of the six characteristics. Here, we redefine the assignment to change the proportion treated to 70%.
+
+my_new_assignment  <- function(data) { N <- nrow(data); sample(c("Z0", "Z1"), N, replace = T, prob = c(0.7, 0.3)) }
+assignment_70     <- declare_assignment(custom_assignment_function = my_assignment, potential_outcomes = potential_outcomes)
+#Then we update the design as follows, keeping the other five characteristics fixed and changing the assignment procedure.
+
+my_new_design <- modify_design(my_design, assignment = assignment_70)
+diagnosis <- diagnose_design(design = my_new_design, population_draws = 10, sample_draws = 10)
+
+kable(summary(diagnosis, statistics = list(calculate_PATE, calculate_sd_SATE, calculate_power, 
+                                           calculate_RMSE, calculate_bias, calculate_coverage, 
+                                           my_statistic), labels = c("PATE", "sd(SATE)", "power", "RMSE", "bias", "coverage",
+                                                                     "custom_stat")), digits = 3)
+```
+## Custom data: Generating the data to work with
+```{r}
+set.seed(5)
+population_user <- declare_population(
+  individuals = list(
+    income = declare_variable()),
+  villages = list(
+    development_level = declare_variable(type = "multinomial", probabilities = 1:3/sum(1:3), outcome_categories = 1:3)
+  ), 
+  size = c(1000, 200))
+
+user_data <- draw_population(population = population_user)
+
+save(user_data, file = "baseline_data.RData")
+```
+
+
+## 1. Load the data
+\tiny
+```{r}
+load("baseline_data.RData")
+kable(head(user_data), digits = 3)
+```
+## 2. Define the potential outcomes, which will be simulated based on the baseline covariate data
+```{r}
+potential_outcomes     <-  declare_potential_outcomes(
+  condition_names = c("Z0","Z1"),
+  formula = Y ~ .01 + .2*(Z=="Z1") + .1*income 
+)
+```
+
+## 3. Then resample (bootstrap) from user data, respecting levels
+```{r}
+population <- declare_population(
+    individuals = list(
+      income = get_variable(level_ID = "individuals_ID", 
+                            variable_name = "income",
+                            data = user_data)
+    ),
+    cities = list(
+      # Here we just grab a variable that does not vary at city level
+      development_level = get_variable(level_ID = "villages_ID",
+                                      variable_name = "development_level",
+                                      data = user_data)
+    ),
+    size = c(500, 50),
+    options = list(user_data = user_data)
+  )
+```
+
+## 4. Define one or more analyses we will run based on simulated data. 
+
+This analysis will also be used for power analysis.
+```{r}
+estimand_ATE <- declare_estimand(estimand_text = "mean(Y_Z_Z1 - Y_Z_Z0)",
+                                 potential_outcomes = potential_outcomes)
+```
+
+## 5.Declare the design of the experiment.
+in this case a simple one without clusters or blocking.
+```{r}
+assignment <- declare_assignment(potential_outcomes = potential_outcomes)
+```
+
+## 6.Declare that we will not sample from the data, but instead analyze it as a population.
+```{r}
+sampling <- declare_sampling(sampling = FALSE)
+```
+
+## 7.Then declare the estimator.
+```{r}
+estimator <- declare_estimator(formula = Y ~ Z, 
+                               estimates = difference_in_means, 
+                               estimand = estimand_ATE)
+```
+
+## 8.Formally characterize the full design as follows:
+```{r}
+my_design <- declare_design(population = population, sampling = sampling,
+                            assignment = assignment, estimator = estimator, 
+                            potential_outcomes = potential_outcomes, label = "simple_design")
+```
+
+## Diagnosis
+Before finalizing the design,  conduct a power analysis to determine whether 500 units and 10 clusters (villages) are sufficient. To do this, we use the diagnose function.
+```{r}
+diagnosis <- diagnose_design(design = my_design, 
+                             population_draws = 10, 
+                             sample_draws = 10)
+```
+
+
+## Diagnosis
+
+\tiny
+```{r}
+kable(summary(diagnosis) [,c("diagnosand_label","diagnosand"), drop=F], digits = 3)
+```
+
+## Mock Analysis
+After settling on a sample size and a final design, we can conduct a mock analysis of the data to ensure we are satisfied with the analysis of the data. To do this, we create mock data ??? simulated from the distributions we set ??? and then run the analyses on the simulated data.
+
+```{r}
+mock_population <- draw_population(population = population)
+mock_population <- assign_treatment(
+  data = mock_population, 
+  assignment = assignment)
+mock_population <- draw_outcome(data = 
+                                  mock_population, 
+                                potential_outcomes = 
+                                  potential_outcomes)
+kable(get_estimands(estimator = estimator, 
+              data = mock_population), digits = 3)
+```
+
+## Look at the results
+\tiny
+```{r}
+kable(get_estimates(estimator = estimator, data = mock_population), digits = 3)
+```
+
+
+## Defining custom block and cluster functions for complex designs
+```{r}
+#For blocked and clustered designs, optional blocking and clustering functions can be defined in a similar way. A blocking function takes a data frame and returns a vector of blocking indicators (for example, numerals 1 to the number of blocks). A cluster function takes a data frame and returns a vector of cluster indicators (for example, numerals 1 to the number of clusters).
+
+my_blocking    <- function(D) { 1*(D$income > 1) } ## two blocks based on values of the income variable
+my_clustering  <- function(D) { rep(1:10, each = nrow(D)/10) } ## village clusters of 10 individuals per village
+my_assignment  <- function(D) { sample(c("Z0", "Z1"), nrow(D), replace = T) }
+assignment     <- declare_assignment(custom_assignment_function = my_assignment, 
+                                     custom_blocking_function = my_blocking,
+                                     block_variable_name = "income_blocks",
+                                     custom_clustering_function = my_clustering,
+                                     cluster_variable_name = "villages",
+                                     potential_outcomes = potential_outcomes)
+```
+
+# Model functions as alternative estimators
+An alternative formulation allows you to define a model function and an estimates function separately. The estimates function can optionally calculate multiple quantities of interest from the same model.
+
+A model function takes data and returns a model object, such as an lm fit or a glm fit.
+```{r}
+#An estimates function here takes a model object and returns a matrix with columns representing estimates and rows representing statistics of the estimates, such as the estimate itself, the standard error, the p-value, etc.
+
+my_model       <- function(D) { lm(Y ~ Z, D) }
+my_estimates   <- function(M) { matrix(est = coef(M)[2], se = sqrt(vcov(M))[2]) }
+estimator      <- declare_estimator(model = my_model, estimates = my_estimates, estimand = estimand)
+```
