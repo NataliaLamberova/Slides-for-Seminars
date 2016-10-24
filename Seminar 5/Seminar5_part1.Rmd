@@ -1,0 +1,270 @@
+---
+title: "Seminar 5"
+author: "Natalia Lamberova"
+date: "10/21/2016"
+output:
+  pdf_document: default
+  html_document: default
+---
+## Agenda
+
+1.Simulating data in DeclareDesign  
+2.Sampling procedures  
+3.Sampling of geographical units  
+
+## Simulating Data in DeclareDesign
+
+```{r}
+set.seed(303)
+library(DeclareDesign)
+N <- 10000
+
+
+# An unnamed, standard normal variable:
+univariate_pop <- declare_population(
+  declare_variable(),
+  size = N
+)
+univariate_draw <- draw_population(population = univariate_pop)
+head(univariate_draw)
+
+
+# Multinomial, binomial and normal covariates
+multivariate_pop <- declare_population(
+  income = declare_variable(type = "normal",
+                            location_scale = c(mean = 1000, sd = 10)),
+  gender = declare_variable(type = "gender"),
+  party = declare_variable(type = "us_party"),
+  employed = declare_variable(type = "binary"),
+  size = N
+)
+multivariate_draw <- draw_population(population = multivariate_pop)
+head(multivariate_draw)
+```
+
+## More data structures
+Can be found here: https://declaredesign.org/howto/how_to_simulate_data.html
+
+## Multilevel covariate Structures
+```{r}
+N_per_level <- c(people = 100,
+                 villages = 5)
+
+# Note: level names are inhereted from the variable declarations, not 
+# from the the N_per_level vector
+
+villagers <- declare_population(
+ person = list(
+   gender =  declare_variable(type = "binary"), # 1 or 0, obviously
+   income = declare_variable(
+    type = "normal",
+    location_scale = c(normal_mean = 10,normal_sd = 5)) #want some positive income, normally distributed
+ ),
+ village = list(
+   N_people_raw = declare_variable(type = "normal",location_scale = c(20,1)),
+   N_people = "round(N_people_raw,0)",
+   poor_area = declare_variable(type = "binary")
+ ),
+ size = N_per_level
+)
+
+people_draw <- draw_population(population = villagers)
+head(people_draw)
+```
+
+## Sampling
+
+
+```{r}
+#install.packages("sampling")
+library(sampling)
+```
+
+## Simple Random Sampling  
+* Simplest sample design
+* Each element has an equal probability of being selected from a list of all population units (sample of n from N population).   
+
+**2 Types of SRS**:   
+
+* SRS with replacement (SRSWR): probability of selection of an element remains unchanged   
+```{r}
+#srswr(n,N), where n is sample size, N is population size
+Inc=people_draw$income
+person=people_draw$person_ID
+n=20
+hist(Inc)
+# Conduct SRS with replacement
+s=srswr(n,length(Inc))
+#with the number of replicates
+as.vector(person[s==1])
+s[s!=0]
+hist(Inc[s==1])
+```
+
+* SRS without replacement (SRSWOR)   
+
+```{r}
+#srswor(n,N), where n is sample size, N is population size
+Inc=people_draw$income
+person=people_draw$person_ID
+n=20
+# Select a sample
+s=srswor(n,length(Inc))
+#The sample is
+as.vector(person[s==1])
+hist(Inc[s==1])
+```
+
+
+**Cons of SRS**:  
+1. Lack of listing frame: the method requires that a list of population elements be available, which is not the case for many populations.  
+2. Problem of small area estimation or domain analysis: For a small sample from a large population, all the areas may not have enough sample size for making small area estimation or for domain analysis by variables of interest.  
+3. Not cost effective: SRS requires covering of whole population which may reside in a large geographic area; interviewing few samples spread sparsely over a large area would be very costly.  
+
+**Hope SRS**  
+<img src="hope_SRS.png" width="500" height="500" alt="" >
+
+**Reality SRS**  
+<img src="Reality_SRS.png" width="500" height="500" alt="" >
+
+**Sytematic Samplig**  
+<img src="SysSRS.png" width="500" height="500" alt="" >
+
+**Pros of Systematic Sampling**  
+1. Provides a better random distribution than SRS  
+2. Simple to implement  
+3. May be started without a complete listing frame (say,interview of every 9th patient coming to a clinic).  
+4. With ordered list, the variance may be smaller than SRS (see below for exceptions) 
+**Cons of SS**
+- Periodicity (cyclic variation)  
+- linear trend  
+
+## Cluster Sampling:
+
+**Advantages**:
+- Generating sampling frame for clusters is economical, and sampling
+frame is often readily available at cluster level
+- Most economical form of sampling
+- Larger sample for a similar fixed cost
+- Less time for listing and implementation
+- Also suitable for survey of institutions
+
+**Disadvantages**:
+- May not reflect the diversity of the community.   
+- Other elements in the same cluster may share similar characteristics.   
+- Provides less information per observation than an SRS of the same size (redundant information: similar information from the others in the cluster).   
+- Standard errors of the estimates are high, compared to other sampling designs with same sample size  
+
+**Key Terms**:
+** Primary sampling units (PSU)**: clusters  
+** Secondary sampling units (SSU)**: households/individual elements   
+** Simple one-stage cluster sample**:  
+
+List all the clusters in the population, and from the list, select the clusters ???
+usually with simple random sampling (SRS) strategy. All units (elements)
+in the sampled clusters are selected for the survey.  
+
+**Simple two-stage cluster sample**:   
+
+List all the clusters in the population.   
+First select the clusters, usually by simple random sampling (SRS).The units (elements) in the selected clusters of the first-stage are then sampled in the second-stage, usually by simple random sampling (or often by systematic sampling). 
+
+```{r}
+#cluster(data, clustername, size, method=c("srswor","srswr","poisson",
+#"systematic"),pik,description=FALSE)
+
+#Select a sample of 3 villages, sampling without replacement
+cl=cluster(people_draw,clustername=c("village_ID"),size=3,method="srswor")
+dat1<-getdata(people_draw, cl)
+head(dat1)
+
+#Select a sample of 3 villages, systematic sampling
+# the pik vector is randomly generated using the U(0,1) distribution
+cl_sys=cluster(people_draw,clustername=c("village_ID"),size=3,method="systematic",
+pik=runif(7))
+# extracts the observed data
+dat<-getdata(people_draw,cl_sys)
+head(dat)
+```
+
+## Stratified Sampling
+**When?**  
+- Population groups may have different values for the responses of interest.  
+- If we want to improve our estimation for each group separately.  
+- To ensure adequate sample size for each group.  
+**Stratified Sampling means**:  
+- stratum variables are mutually exclusive (non-over lapping), e.g., urban/rural areas, economic categories, geographic regions,race, sex, etc.  
+- the population (elements) should be homogenous within-stratum, and  
+- the population (elements) should be heterogenous between the strata.  
+
+**Pros**:
+1. Provides opportunity to study the stratum variations - estimation could be made for
+each stratum  
+2. Disproportionate sample may be selected from each stratum  
+3. The precision likely to increase as variance may be smaller than SRS with same sample size  
+4. Field works can be organized using the strata (e.g., by geographical areas or regions)  
+5. Reduce survey costs  
+
+** Cons**:  
+- Sampling frame is needed for each stratum  
+- Analysis method is complex (Correct variance estimation)  
+- Data analysis should take sampling ???weight??? into account for disproportionate sampling of strata   
+- Sample size estimation is difficult in practice    
+
+**For Stratified Sampling**:  
+- Variance estimated under stratified sampling is always lower than the variance estimated under SRS.  
+- Strata totals are additive. But, not the strata means!  
+- A minimum of two-elements must be chosen from each stratum so that sampling errors can be estimated for all strata independently.  
+- The population (elements) should be homogenous within stratum, and the population (elements) should be heterogenous between the strata.  
+
+**Stratified sampling of villages in poor and rich areas**   
+
+```{r}
+#strata(data, stratanames=NULL, size, method=c("srswor","srswr","poisson",
+#"systematic"), pik,description=FALSE)
+# the variable "poor_area" has 2 categories ('0' and '1'). 
+# the variable "village_ID" has 5 categories (1, 2, 3,4,5).
+# computes the population stratum sizes
+table(people_draw$poor_area,people_draw$village_ID)
+# there are 5 cells with non-zero values
+# one draws 5 samples (1 sample in each stratum)
+# the sample stratum sizes are 10,9,11,12,12, respectively
+# the method is 'srswor' (equal probability, without replacement)
+s=strata(people_draw,c("poor_area","village_ID"),size=c(10,9,11,12,12), method="srswor")
+# extracts the observed data
+a<-getdata(people_draw,s)
+head(a)
+# see the result using a contigency table
+table(s$poor_area,s$village_ID)
+```
+
+**Stratified sampling by village_ID and individual-level covariate (gender)**
+```{r}
+# compute the population stratum sizes:
+table(people_draw$village_ID,people_draw$gender)
+# there are 10 cells with non-zero values
+# one draws 10 samples (1 sample in each stratum)
+# the sample stratum sizes are 5,6,7,4,5,8,5,4,4,5,6,2 respectively
+s=strata(people_draw,c("village_ID","gender"),size=c(5,6,7,4,5,8,5,4,4,5,6,2), method="systematic",pik=people_draw$income) ## the selection probabilities are computed using the variable 'income'
+b<-getdata(people_draw,s)
+head(b)
+table(s$village_ID,s$gender)
+```
+
+## 3.Sampling of geographical units (GIS in R)
+
+
+```{r}
+#library(pacman)
+#p_load(ggmap,rgdal,rgeos,maptools,dplyr,tidyr,tmap)
+```
+
+**1. Getting the Data**
+Go here: [https://github.com/Robinlovelace/Creating-maps-in-R]  
+Download as a ZIP or through cloning, unpack into the folder you're working in.   Create a new .Rpoj or open Creating-maps-in-R.Rproj 
+
+Now I will move to Creating-maps-in-R.Rproj in my GitHub, Seminar 5.
+
+
+
+

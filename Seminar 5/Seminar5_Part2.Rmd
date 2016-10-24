@@ -1,0 +1,178 @@
+---
+title: "Creating_maps_Seminar5"
+author: "Natalia Lamberova"
+date: "10/21/2016"
+output:
+  pdf_document: default
+  html_document: default
+---
+**Housekeping**
+We will need many new packages. Package "pacman" loads all packages you specify, and installs the packages that are not available locally.
+```{r}
+#install.packages("pacman")
+library(pacman)
+p_load(ggmap,rgdal,rgeos,maptools,dplyr,tidyr,tmap)
+
+```
+
+## Reading the data
+```{r}
+lnd <- readOGR(dsn = "data", layer = "london_sport")
+```
+The files beginning london_sport in the data/ directory contain the population of London Boroughs in 2001 and the percentage of the population participating in sporting activities. This data originates from the Active
+People Survey. The boundary data is from the Ordnance Survey.
+For information about how to load different types of spatial data, see the help documentation for readOGR.
+
+## The structure of spatial data in R
+We have now created a new spatial object called lnd from the ???london_sport??? shapefile. Spatial objects are
+made up of a number of different slots, the key ones being @data and @polygons (or @lines for line data)
+geometry data. 
+The data slot can be thought of as an covariate table and the geometry slot is where the
+vertices of the object lie in space. 
+Let???s now analyse the sport object with some basic commands:
+```{r}
+head(lnd@data) # @ here fetches the SLOT of the data, the same way that $ fetches the attribute of a slot.
+mean(lnd$Partic_Per) # Partic_Per was calculated for each slot using the line above. Partic_Per=sports participation per 100 people
+```
+To display the raw coordinates of the first polygon, for example, we must select a slot within a slot within
+a slot. The following code, for example, selects the first polygon of lnd and then selects the first Polygon
+within this spatial unit (there is usually only one) and then returns the coordinates of this. 
+```{r}
+head(lnd@polygons[[1]]@Polygons[[1]]@coords)
+plot(lnd@polygons[[1]]@Polygons[[1]]@coords)
+nrow(lnd) # 33 poligons (how many zones the data contains)
+```
+
+## Making pretty pictures
+Plots use the geometry data, contained primarily in the @polygons slot in the above example, to draw the shape of the zones. The information in @data will typically be used to colour in the map. which describes
+where the polygons are located in space:
+```{r}
+#Plot of Slots:
+plot(lnd)
+#Plot of slot covariates:
+plot(lnd@data)
+```
+
+#Selecting zones:
+
+```{r}
+#Select slots with sport participation<15:
+lnd@data[lnd$Partic_Per<15,] #the comma here tells us which columns to return
+
+## Select zones where sports participation is between 20 and 25%
+sel <- lnd$Partic_Per > 20 & lnd$Partic_Per < 25
+plot(lnd[sel, ]) 
+head(sel) # test output of previous selection (not shown)
+
+#See selected areas in context:
+#If you have several selection criterea, use &
+plot(lnd, col = "lightgrey") # plot the london_sport object
+sel <- lnd$Partic_Per > 25
+plot(lnd[ sel, ], col = "turquoise", add = TRUE) # add selected zones to map 
+```
+
+## Zones for which the center of zone lies within 10 km distance from center of London
+
+```{r}
+#Zones in London whose centroid lie within 10 km of the geographic centroid of the City of London. Note the #distinction between zones which only touch or 'intersect' with the buffer (light blue) and zones whose centroid is #within the buffer (darker blue).
+library(rgeos)
+plot(lnd, col = "grey")
+# find London's geographic centroid (add ", byid = T" for all)
+cent_lnd <- gCentroid(lnd[lnd$name == "City of London",]) 
+points(cent_lnd, cex = 3)
+# set 10 km buffer
+# gBuffer expands the given geometry to include the area within the specified width with specific styling options. 
+#spgeom	- sp object as defined in package sp
+lnd_buffer <- gBuffer(spgeom = cent_lnd, width = 10000) 
+
+# method 1 of subsetting selects any intersecting zones
+#lnd_central <- lnd[lnd_buffer,] # the selection is too big!
+#plot(lnd_central, col = "lightblue", add = T)
+#plot(lnd_buffer, add = T) # some areas just touch the buffer
+
+# method2 of subsetting selects only points within the buffer
+lnd_cents <- SpatialPoints(coordinates(lnd),
+proj4string = CRS(proj4string(lnd))) # create spatialpoints
+sel <- lnd_cents[lnd_buffer,] # select points inside buffer
+points(sel) # show where the points are located
+lnd_central <- lnd[sel,] # select zones intersecting w. sel
+plot(lnd_central, add = T, col = "lightslateblue", 
+  border = "grey")
+plot(lnd_buffer, add = T, border = "red", lwd = 2)
+
+# Add text to the plot!
+text(coordinates(cent_lnd), "Central\nLondon")
+```
+
+## Selecting quadrants
+
+Split London  into quadrants using lines of latitude and longitude. Once we have the centre point we will then use it to create the lines of latitude and longitude on which the centre of the wards will be tested against.
+
+
+
+```{r}
+# Find the centre of the london area
+lat <- coordinates(gCentroid(lnd))[[1]]
+lng <- coordinates(gCentroid(lnd))[[2]]
+
+# arguments to test whether or not a coordinate is east or north of the centre
+east <- sapply(coordinates(lnd)[,1], function(x) x > lat)
+north <- sapply(coordinates(lnd)[,2], function(x) x > lng)
+
+# arguments to test whether or not a coordinate is west or south of the centre
+west <- sapply(coordinates(lnd)[,1], function(x) x < lat)
+south <- sapply(coordinates(lnd)[,2], function(x) x < lng)
+
+# test if the coordinate is east and north of the centre
+lnd@data$quadrant[east & north] <- "northeast"
+lnd@data$quadrant[west & south] <- "southwest"
+#plot the results
+plot(lnd)
+plot(lnd[east & north,],add = TRUE, col = "red" )
+plot(lnd[west & south,],add = TRUE, col = "green" )
+# place a grid over the object
+llgridlines(lnd, lty= 3, side ="EN", offset = -0.5)
+```
+
+
+## Attribute data
+
+Shapefiles contain both attribute data and geometry data, both of which are automatically loaded into R when the `readOGR` function is used. Let's look again at the attribute data of the `lnd` object by looking at the headings contained within it: `names(lnd)`   
+Remember, the attribute data is contained in the `data` *slot* that can be accessed using the `@` symbol: `lnd@data`. This is useful if you do not wish to work with the spatial components of the data at all times.   
+
+```{r}
+summary(lnd)
+```
+
+## Sampling geographic units:
+
+**Simple Random Sampling**   
+First, let's extract the data from .shp to data frame to use for sampling:   
+```{r}
+lnd.df <- as(lnd, "data.frame")
+str(lnd.df)
+head(lnd.df)
+# Let's select 10 region with simple random sampling w/o replacement:
+library(sampling)
+Partic=lnd.df$Partic_Per
+region=lnd.df$name
+n=10
+hist(Partic)
+# Select a sample
+s=srswor(n,length(Partic))
+#The sample is
+as.vector(region[s==1])
+hist(Partic[s==1])
+```
+
+**Clustered sampling based on quadrants**    
+```{r}
+head(lnd.df)
+#Let's make "quadrant" binary: northeast=1, else=0
+#replace NAs by 0:
+lnd.df[is.na(lnd.df)] <- 0
+as.factor(lnd.df$quadrant)
+cl=cluster(lnd.df,clustername=c("quadrant"),size=2,method="srswor")
+dat1<-getdata(lnd.df, cl)
+head(dat1)
+```
