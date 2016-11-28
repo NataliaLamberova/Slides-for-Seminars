@@ -1,0 +1,222 @@
+---
+title: "Seminar 9"
+author: "Natalia Lamberova"
+date: "11/27/2016"
+output:
+  beamer_presentation: default
+  ioslides_presentation: default
+  slidy_presentation: default
+---
+
+
+## Spillovers
+The non-interference (SUTVA) assumption requires that potential outcomes for subject $i$ respond only to the subject's own treatment status, $D_i$, such that $Y_i(D_i) =Y_i(D)$. Or, in the case of noncompliance with the vector of assignment $Z_i$ and actual treatment $D_i$, the assumption is $Y_i(Z_i, D_i) = Y_i(Z, D)$.        
+
+***Examples of SUTVA violations:*** contagion, displacement, communication, social comparison, signaling, and memory.      
+Spillovers require more complex potential outcomes models then $Y_i(1)$ if i is treated and $Y_i(0)$ if not.      
+
+## Causal Effects in the Presence of Spillover
+***Example:*** multi-level design for turnout encouragement intervention.       
+Four potential outcomes for each voter:     
+1. neither voter nor housemate $Y_{00}$,      
+2. only housemate $Y_{01}$,    
+3. only voter $Y_{10},    
+4. both $Y_{11}$.      
+
+## Interesting causal effects:           
+1. $Y_{10} - Y_{00}$ is effect of personal target conditional on housemate receiving nothing    
+2. $Y_{11} - Y_{01}$ is effect of personal target conditional on housemate also targeted.    
+
+## Spillover effects: 
+1. $Y_{01} - Y_{00}$ is spillover effect on those who receive no mail     
+2. $Y_{11} - Y_{10}$ is spillover effect on those who receive mail.      
+
+Still requires ***non-interference assumption*** that potential outcomes are unaffected by treatments administered to those outside their own household! No unmodeled spillovers.
+
+Are errors independent?     
+-No, they are still correlated across observations.     
+However this does not bias estimators and can be corrected.     
+
+## Direction of bias:
+incorrectly ignoring spillover effects would lead one to this equation: $$1/2(Y_{11}-Y_{10}) - 1/2(Y_{01}- Y_{00})=\hat{Y_{10}}-\hat{Y_{00}}$$. 
+When there are no spillovers (plus randomization), this is an unbiased ATE. 
+
+## But if there are spillovers...
+the ATE will be biased upward if $Y_{11} - Y_{10} > Y_{01} - Y_{00}$, or downward if the inequality is flipped.      
+Multilevel designs vary the degree of first- and secondhand exposure to the treatment.    
+
+## Spatial Spillovers
+Spillovers are not always confined to neat units: sometimes you're interested in proximity to treated locations. You must develop a metric for proximity, and regress outcomes on treatment and the proximity metric.     
+* Developing a measure for proximity presupposes a model of how spillovers are transmitted. Euclidean distance to treatment, density of treatments in an area, distance in travel time, etc.       
+* Flexible models (where the data determine the rate of decay) generate imprecise estimates. Getting the right model is critical.
+
+## Warnings
+Proximity to treated locations is NOT random just because treatment assignment is random. It is ***conditionally*** random:
+for those subjects that share the same spatial orientation to other subjects, proximity is random. Thus, to avoid bias need to account  for blocking on spatial orientation.     
+
+## Two methods to deal with spatial orientation:
+* Match observations according to their proximity to all potentially treated units and estimate treatment effects within matching strata.      
+* Measure the spatial arrangement of observations using metrics such as average distance to all other observations or the number of other observations within a certain radius. Then these measures are included as covariates in the regression.        
+This is riskier because it introduces parametric assumptions (dummies do not).     
+Both methods depend heavily on assumed models of proximity      
+
+## Using non-experimental units
+"Failure to investigate the effects of spillovers on non-experimental units is like leaving money on the table." 
+Discovery of spillovers (or no spillovers) inspires follow-up substantive research and justifies modeling assumptions for future studies. Must still block on spatial orientation.
+
+## DeclareDesign questions (Recap)
+
+## Creating Covariates Transforming other Covariates
+ Here we create 'age' as a rounded draw from a normal distribution
+```{r}
+library(DeclareDesign)
+transform_pop <- declare_population(
+  # Declare the raw variables 
+  age_raw = declare_variable(
+    type = "normal",
+    location_scale = c(normal_mean = 30,normal_sd = 5)),
+  # Declare the transformation
+  age_rounded = "round(age_raw,0)",
+  size = 100
+)
+
+transform_draw <- draw_population(
+  population = transform_pop)
+head(transform_draw)
+```
+
+##Changes in proportions:
+Simple Changes in Proportions
+You may want to specify potential outcomes at the group-level, especially when the outcome is binary or categorical. For example, we might want to specify that the treatment increases uptake of a service by 5%, or we might want to specify that it increases the probability of voting for candidate A by 10%, while reducing that of voting for B and C by 6% and 4%, respectively. Binary case in presented below:
+
+```{r}
+# Make a very simple sample frame
+simple_frame <- declare_population(
+  one_level = list(),size = 10)
+# Make a very simple assignment scheme
+condition_names <- c(0,1)
+assignment <- declare_assignment(
+  condition_names = condition_names)
+# Make the draw
+pop_draw <- draw_population(
+  population = simple_frame)
+pop_draw <- assign_treatment(
+  data = pop_draw,
+  assignment = assignment)
+```
+
+## Continued
+```{r}
+condition_names<-c(0,1)
+success_proportions <- c(control = .3, treatment = .8)
+
+proportion_PO_1 <- declare_potential_outcomes(
+  potential_outcomes_function = proportion_potential_outcomes_function,
+  condition_names = condition_names,
+  assignment_variable_name = "Z",
+  outcome_variable_name = "Y",
+  population_proportions = success_proportions)
+
+prop_draw_1 <- draw_outcome(data = pop_draw,
+                            potential_outcomes = proportion_PO_1)
+head(prop_draw_1)
+```
+
+## Blocktools Package
+Allows to block units into experimental blocks, with one unit per treatment condition, by creating a measure of multivariate distance between all possible pairs of units. Maximum, minimum, or an allowable range of differences between units on one variable can be set. Randomly assign units to treatment conditions. 
+
+## Loading the data
+```{r}
+library(pacman)
+p_load(DeclareDesign,randomizr,blockTools)
+data(HairEyeColor)
+HairEyeColor <- data.frame(HairEyeColor)
+# Transform so each row is a subject
+# Columns describe subject's hair color, 
+#eye color, and gender
+hec <- HairEyeColor[rep(1:nrow(HairEyeColor),
+                        times = HairEyeColor$Freq), 1:3]
+
+N <- nrow(hec)
+# Fix the rownames
+rownames(hec) <- NULL
+```
+
+## Expolring the data:
+```{r}
+dim(hec)
+head(hec,2)
+```
+
+## Create Potential Outcomes
+```{r}
+# Set a seed for reproducability
+set.seed(343)
+# Create untreated and treated outcomes for all subjects
+hec <- within(hec,{
+  Y0 <- rnorm(n = N,mean = (
+    2*as.numeric(Hair) +
+     -4*as.numeric(Eye) + 
+     -6*as.numeric(Sex)), sd = 5)
+  Y1 <- Y0 + 6*as.numeric(Hair) +
+    4*as.numeric(Eye) + 
+    2*as.numeric(Sex)
+})
+# Calculate true ATE
+atet<-with(hec, mean(Y1 - Y0))
+atet
+```
+
+
+## Blocking in DD:
+```{r}
+Z <- block_ra(block_var = hec$Hair)
+table(Z, hec$Hair)
+#For multiple treatment arms, use the num_arms argument, 
+#with or without the condition_names argument
+Z <- block_ra(block_var = hec$Hair, num_arms = 3)
+table(Z, hec$Hair)
+Z <- block_ra(block_var = hec$Hair, 
+              condition_names = c("Control", "Placebo", "Treatment"))
+table(Z, hec$Hair)
+```
+
+## Creating blocks in BlockTools
+
+```{r}
+
+library(blockTools)
+# BlockTools requires that all variables be numeric
+numeric_mat <- model.matrix(
+  ~Hair+Eye+Sex, data=hec)[,-1]
+# BlockTools also requres an id variable
+df_forBT <- data.frame(id_var = 
+                         1:nrow(numeric_mat), numeric_mat)
+out <- block(df_forBT, 
+             n.tr = 3, id.vars = "id_var", 
+             block.vars = colnames(df_forBT)[-1])
+# Extact the block_ids
+hec$block_id <- createBlockIDs(
+  out, df_forBT, id.var = "id_var")
+# Conduct actual random assignment with randomizr
+Z_blocked <- block_ra(
+  block_var = hec$block_id, num_arms = 3)
+head(table(hec$block_id, Z_blocked))
+```
+
+
+## Using Blocktools in Declare Design
+```{r, eval=FALSE}
+block_fun <- function(data) {
+block(df_forBT, n.tr = 3, 
+      id.vars = "id_var", 
+             block.vars = colnames(df_forBT)[-1])
+block_vector <- (hec$block_id)
+return(block_vector) 
+}
+assignment<-declare_assignment(
+  custom_assignment_function = block_fun)
+
+```
+
+
